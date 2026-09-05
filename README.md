@@ -51,6 +51,16 @@ Detect → Understand → Recommend → Authorize → Act → Observe
 
 <p align="center"><sub>Persisted control-flow checkpoints, recovery attribution, action health, and the calculated held-out experiment result</sub></p>
 
+### Held-out recovery experiment
+
+<p align="center">
+  <a href="docs/assets/recoverai-recovery-lab.png">
+    <img src="docs/assets/recoverai-recovery-lab.png" alt="RecoverAI Recovery Lab comparing a fixed baseline with contextual policy-governed recovery across 100 identical synthetic cases, showing 53,990 rupees in incremental recovery" width="100%" />
+  </a>
+</p>
+
+<p align="center"><sub>The same 100 synthetic cases produce ₹53,990 in calculated incremental recovery, four fewer contacts, and zero policy violations or duplicate actions</sub></p>
+
 ## Five-minute demo
 
 1. Open **Overview** to see database-derived revenue, case health, recovery methods, customer friction, and the latest evaluation.
