@@ -6,6 +6,14 @@ RecoverAI takes ownership of failed recurring-payment cases from detection to re
 
 > Built for the Razorpay Buildathon. All Recovery Lab results are synthetic and all Razorpay integration activity is **Test Mode only**.
 
+<p align="center">
+  <a href="docs/assets/recoverai-overview.png">
+    <img src="docs/assets/recoverai-overview.png" alt="RecoverAI revenue control room showing recovered revenue, revenue at risk, recovery rate, active cases, human reviews, Razorpay Test Mode recovery, and the cumulative recovery chart" width="100%" />
+  </a>
+</p>
+
+<p align="center"><sub>Revenue control room with database-derived recovery metrics and separately labeled Razorpay Test Mode accounting</sub></p>
+
 ## The problem
 
 Fixed dunning flows treat every failed payment the same: wait, retry, send a generic reminder, retry again, then stop. That leaves recoverable revenue behind and creates unnecessary customer friction.
@@ -32,6 +40,16 @@ Detect → Understand → Recommend → Authorize → Act → Observe
 | Human control           | High-value, disputed, unsafe, and low-confidence cases enter a review queue               |
 | Failure recovery        | Duplicate webhooks, AI failures, provider failures, and race conditions are testable      |
 | Auditability            | Decisions, policy checks, state transitions, actions, failures, and outcomes are recorded |
+
+### Recovery intelligence
+
+<p align="center">
+  <a href="docs/assets/recoverai-intelligence.png">
+    <img src="docs/assets/recoverai-intelligence.png" alt="RecoverAI operational analytics showing the recovery control funnel, recovered-volume attribution, bounded action health, and incremental Recovery Lab revenue" width="100%" />
+  </a>
+</p>
+
+<p align="center"><sub>Persisted control-flow checkpoints, recovery attribution, action health, and the calculated held-out experiment result</sub></p>
 
 ## Five-minute demo
 
