@@ -1,0 +1,312 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum PaymentStatus {
+  PENDING
+  FAILED
+  SUCCEEDED
+  CANCELLED
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  PAUSED
+  CANCELLED
+}
+
+enum MandateState {
+  ACTIVE
+  PENDING
+  INVALID
+  EXPIRED
+}
+
+enum RecoveryState {
+  DETECTED
+  ANALYZING
+  DECISION_READY
+  POLICY_CHECK
+  SCHEDULED
+  ACTION_PENDING
+  ACTION_EXECUTED
+  WAITING
+  RECOVERED
+  ESCALATED
+  STOPPED
+  FAILED
+}
+
+enum RecoveryActionType {
+  WAIT
+  SMART_RETRY
+  REQUEST_PAYMENT_METHOD_UPDATE
+  SEND_WHATSAPP
+  SEND_EMAIL
+  SEND_PAYMENT_LINK
+  ESCALATE
+  STOP
+}
+
+enum PolicyOutcome {
+  ALLOW
+  BLOCK
+  ESCALATE
+}
+
+enum ActionStatus {
+  SCHEDULED
+  PENDING
+  EXECUTED
+  FAILED
+  CANCELLED
+  NO_OP
+}
+
+enum ReviewStatus {
+  PENDING
+  APPROVED
+  MODIFIED
+  STOPPED
+}
+
+enum EvaluationStrategy {
+  BASELINE
+  RECOVER_AI
+}
+
+model Customer {
+  id                   String         @id
+  name                 String
+  email                String?
+  phoneMasked          String?
+  preferredChannel     String         @default("EMAIL")
+  optedOut             Boolean        @default(false)
+  valueSegment         String         @default("STANDARD")
+  createdAt            DateTime       @default(now())
+  updatedAt            DateTime       @updatedAt
+  subscriptions        Subscription[]
+  payments             Payment[]
+  recoveryCases        RecoveryCase[]
+}
+
+model Subscription {
+  id                     String             @id
+  customerId             String
+  providerSubscriptionId String?            @unique
+  status                 SubscriptionStatus @default(ACTIVE)
+  mandateState           MandateState       @default(ACTIVE)
+  ageMonths              Int                @default(1)
+  successfulPayments     Int                @default(0)
+  failedPayments         Int                @default(0)
+  nextProviderRetryAt    DateTime?
+  createdAt              DateTime           @default(now())
+  updatedAt              DateTime           @updatedAt
+  customer               Customer           @relation(fields: [customerId], references: [id])
+  payments               Payment[]
+  recoveryCases          RecoveryCase[]
+}
+
+model Payment {
+  id                String        @id
+  customerId        String
+  subscriptionId    String?
+  providerPaymentId String?       @unique
+  amountPaisa       Int
+  currency          String        @default("INR")
+  status            PaymentStatus @default(FAILED)
+  failureReason     String?
+  recoveredAt       DateTime?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+  customer          Customer      @relation(fields: [customerId], references: [id])
+  subscription      Subscription? @relation(fields: [subscriptionId], references: [id])
+  recoveryCase      RecoveryCase?
+}
+
+model RecoveryCase {
+  id                   String              @id
+  customerId           String
+  subscriptionId       String?
+  paymentId            String              @unique
+  source               String              @default("SIMULATOR")
+  state                RecoveryState       @default(DETECTED)
+  failureReason        String
+  amountPaisa          Int
+  retryCount           Int                 @default(0)
+  contactCount         Int                 @default(0)
+  lastContactAt        DateTime?
+  aiConfidence         Float?
+  currentAction        RecoveryActionType?
+  nextActionAt         DateTime?
+  recoveredAmountPaisa Int                 @default(0)
+  escalationReason     String?
+  disputed             Boolean             @default(false)
+  fraudSignal          Boolean             @default(false)
+  inconsistentState    Boolean             @default(false)
+  previousRetrySucceeded Boolean           @default(false)
+  version              Int                 @default(1)
+  createdAt            DateTime            @default(now())
+  updatedAt            DateTime            @updatedAt
+  customer             Customer            @relation(fields: [customerId], references: [id])
+  subscription         Subscription?       @relation(fields: [subscriptionId], references: [id])
+  payment              Payment             @relation(fields: [paymentId], references: [id])
+  decisions            RecoveryDecision[]
+  policyEvaluations    PolicyEvaluation[]
+  actions              RecoveryAction[]
+  auditEvents          AuditEvent[]
+  providerEvents       ProviderEvent[]
+  humanReview          HumanReview?
+
+  @@index([state])
+  @@index([updatedAt])
+}
+
+model ProviderEvent {
+  id                 String        @id @default(cuid())
+  provider           String
+  providerEventId    String        @unique
+  eventType          String
+  payload            Json
+  signatureVerified  Boolean       @default(false)
+  duplicateCount     Int           @default(0)
+  receivedAt         DateTime      @default(now())
+  processedAt        DateTime?
+  recoveryCaseId     String?
+  recoveryCase       RecoveryCase? @relation(fields: [recoveryCaseId], references: [id])
+  auditEvents        AuditEvent[]
+}
+
+model RecoveryDecision {
+  id                    String             @id @default(cuid())
+  recoveryCaseId        String
+  provider              String
+  action                RecoveryActionType
+  confidence            Float
+  reasonCode            String
+  explanation           String
+  recommendedDelayHours Int?
+  communicationIntent   String?
+  rawOutput             Json?
+  createdAt             DateTime           @default(now())
+  recoveryCase          RecoveryCase       @relation(fields: [recoveryCaseId], references: [id])
+  policyEvaluations     PolicyEvaluation[]
+  actions               RecoveryAction[]
+}
+
+model PolicyEvaluation {
+  id              String            @id @default(cuid())
+  recoveryCaseId  String
+  decisionId      String?
+  outcome         PolicyOutcome
+  reasonCode      String
+  explanation     String
+  checks          Json
+  createdAt       DateTime          @default(now())
+  recoveryCase    RecoveryCase      @relation(fields: [recoveryCaseId], references: [id])
+  decision        RecoveryDecision? @relation(fields: [decisionId], references: [id])
+}
+
+model RecoveryAction {
+  id                    String             @id @default(cuid())
+  recoveryCaseId        String
+  decisionId            String?
+  type                  RecoveryActionType
+  status                ActionStatus       @default(PENDING)
+  idempotencyKey        String             @unique
+  providerReferenceId   String?            @unique
+  providerResourceUrl   String?
+  scheduledFor          DateTime?
+  providerOperationId   String?
+  result                Json?
+  attempts              Int                @default(0)
+  error                 String?
+  executedAt            DateTime?
+  createdAt             DateTime           @default(now())
+  updatedAt             DateTime           @updatedAt
+  recoveryCase          RecoveryCase       @relation(fields: [recoveryCaseId], references: [id])
+  decision              RecoveryDecision?  @relation(fields: [decisionId], references: [id])
+}
+
+model AuditEvent {
+  id               String         @id @default(cuid())
+  recoveryCaseId   String?
+  providerEventId  String?
+  type             String
+  fromState        RecoveryState?
+  toState          RecoveryState?
+  message          String
+  metadata         Json
+  createdAt        DateTime       @default(now())
+  recoveryCase     RecoveryCase?  @relation(fields: [recoveryCaseId], references: [id])
+  providerEvent    ProviderEvent? @relation(fields: [providerEventId], references: [id])
+
+  @@index([recoveryCaseId, createdAt])
+}
+
+model HumanReview {
+  id               String       @id @default(cuid())
+  recoveryCaseId   String       @unique
+  status           ReviewStatus @default(PENDING)
+  reason           String
+  recommendation   String
+  policyReasonCode String
+  decidedBy        String?
+  notes            String?
+  createdAt        DateTime     @default(now())
+  resolvedAt       DateTime?
+  recoveryCase     RecoveryCase @relation(fields: [recoveryCaseId], references: [id])
+}
+
+model RecoveryPolicy {
+  id                         String   @id @default("default")
+  maxRetries                 Int      @default(3)
+  maxContacts                Int      @default(3)
+  minContactIntervalHours    Int      @default(12)
+  highValueThresholdPaisa    Int      @default(5000000)
+  minAiConfidence            Float    @default(0.70)
+  stopAfterSuccess           Boolean  @default(true)
+  respectOptOut              Boolean  @default(true)
+  disputeEscalation          Boolean  @default(true)
+  updatedAt                  DateTime @updatedAt
+}
+
+model RecoveryEvaluationRun {
+  id                String           @id @default(cuid())
+  seed              Int
+  datasetSize       Int
+  status            String           @default("RUNNING")
+  baselineMetrics   Json?
+  recoverAiMetrics  Json?
+  createdAt         DateTime         @default(now())
+  completedAt       DateTime?
+  cases             EvaluationCase[]
+}
+
+model EvaluationCase {
+  id                 String             @id @default(cuid())
+  runId              String
+  syntheticCaseId    String
+  strategy           EvaluationStrategy
+  observableContext  Json
+  hiddenBehavior     Json
+  decision           Json
+  policy             Json
+  outcome            Json
+  amountPaisa        Int
+  recoveredPaisa     Int                @default(0)
+  contacts           Int                @default(0)
+  escalated          Boolean            @default(false)
+  policyViolations   Int                @default(0)
+  duplicateActions   Int                @default(0)
+  createdAt          DateTime           @default(now())
+  run                RecoveryEvaluationRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@unique([runId, syntheticCaseId, strategy])
+  @@index([runId, strategy])
+}
