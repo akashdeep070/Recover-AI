@@ -1,119 +1,185 @@
 # RecoverAI
 
-RecoverAI is a policy-governed AI revenue recovery controller for failed recurring and subscription payments. It detects revenue at risk, uses bounded AI judgment to choose an intervention, applies deterministic authorization, executes through idempotent adapters, observes outcomes, and preserves a complete audit trail.
+### An AI revenue recovery controller that knows when to act—and when not to.
 
-All included demo and Recovery Lab money values are synthetic. Razorpay integrations are Test Mode only.
+RecoverAI takes ownership of failed recurring-payment cases from detection to resolution. It combines contextual AI judgment with deterministic financial controls, executes only pre-approved actions, observes the outcome, and records an immutable explanation of what happened.
 
-## What RecoverAI does
+> Built for the Razorpay Buildathon. All Recovery Lab results are synthetic and all Razorpay integration activity is **Test Mode only**.
+
+## The problem
+
+Fixed dunning flows treat every failed payment the same: wait, retry, send a generic reminder, retry again, then stop. That leaves recoverable revenue behind and creates unnecessary customer friction.
+
+RecoverAI makes each recovery decision from the context of the case—failure reason, mandate state, payment history, customer preferences, recent contact, risk signals, and value—while keeping authority in deterministic code.
 
 ```text
-Payment event
-  -> normalize + deduplicate
-  -> RecoveryCase
-  -> observable context
-  -> structured recovery decision
-  -> deterministic policy engine
-  -> bounded idempotent executor
-  -> observe result
-  -> state transition + immutable audit event
-  -> recover / wait / escalate / stop
+Revenue at risk
+    ↓
+Detect → Understand → Recommend → Authorize → Act → Observe
+    ↑                                                ↓
+    └──────── recover / wait / review / stop ───────┘
 ```
 
-The supported model action space is exactly:
+## What this project proves
 
-- `WAIT`
-- `SMART_RETRY`
-- `REQUEST_PAYMENT_METHOD_UPDATE`
-- `SEND_WHATSAPP`
-- `SEND_EMAIL`
-- `SEND_PAYMENT_LINK`
-- `ESCALATE`
-- `STOP`
+| Capability              | How RecoverAI demonstrates it                                                             |
+| ----------------------- | ----------------------------------------------------------------------------------------- |
+| Measurable recovery     | Runs a fixed baseline and RecoverAI against the same 100 held-out cases                   |
+| Bounded AI              | The model can recommend only eight schema-validated actions                               |
+| Deterministic authority | Policy code—not the model—controls money, limits, consent, and stopping                   |
+| Safe autonomy           | Every action requires policy approval and an idempotent operation ID                      |
+| Intelligent no-action   | `WAIT` and `STOP` are first-class decisions when contact would be harmful or redundant    |
+| Human control           | High-value, disputed, unsafe, and low-confidence cases enter a review queue               |
+| Failure recovery        | Duplicate webhooks, AI failures, provider failures, and race conditions are testable      |
+| Auditability            | Decisions, policy checks, state transitions, actions, failures, and outcomes are recorded |
+
+## Five-minute demo
+
+1. Open **Overview** to see database-derived revenue, case health, recovery methods, customer friction, and the latest evaluation.
+2. Open **Recovery Lab** and select **Run evaluation**. RecoverAI and the fixed baseline receive the same 100 cases and hidden outcome behavior.
+3. Compare incremental revenue, recovery-rate uplift, contacts, escalations, policy violations, and duplicate actions.
+4. Expand a lab case to inspect its observable context, AI recommendation, policy result, and simulated outcome.
+5. Open **Recoveries** and inspect a case timeline to answer: _What happened? Why? Was it allowed? What happened next?_
+6. Open **Needs Review** to show that high-value, disputed, or low-confidence cases cannot execute autonomously.
+7. Inject **Duplicate webhook**, **Invalid AI output**, or **Payment success during wait** and inspect the safe result.
+
+The reproducible seed `20260823` currently calculates:
+
+| Metric               | Fixed baseline | RecoverAI |                 Difference |
+| -------------------- | -------------: | --------: | -------------------------: |
+| Revenue recovered    |      ₹2,67,369 | ₹3,21,359 |               **+₹53,990** |
+| Customer contacts    |             83 |        79 |                     **−4** |
+| Recovery-rate uplift |              — |         — | **+4.0 percentage points** |
+| Policy violations    |              0 |         0 |                          0 |
+| Duplicate actions    |              0 |         0 |                          0 |
+
+These are deterministic simulator results for architecture evaluation—not merchant revenue, production performance, or claimed traction.
+
+## AI recommends. Policy authorizes.
+
+RecoverAI uses AI only where ambiguity is useful: interpreting context and recommending the next recovery step. The model must return exactly one structured action:
+
+```text
+WAIT                         SMART_RETRY
+REQUEST_PAYMENT_METHOD_UPDATE
+SEND_WHATSAPP                SEND_EMAIL
+SEND_PAYMENT_LINK            ESCALATE
+STOP
+```
+
+A decision also contains confidence, a reason code, an explanation, an optional delay, and optional communication intent. Invalid or unavailable model output is rejected before execution.
+
+The model can **never** override:
+
+- transaction amount or authoritative financial calculations
+- authorization and policy thresholds
+- retry and customer-contact limits
+- opt-outs, mandate restrictions, disputes, or fraud controls
+- stopping conditions or high-value approval
+- state transitions, idempotency, or audit history
+
+The policy engine returns `ALLOW`, `BLOCK`, or `ESCALATE`. Its result is authoritative—even when the model recommends something else.
 
 ## Architecture
 
-- Next.js 16 App Router and TypeScript for the product UI and HTTP boundaries.
-- PostgreSQL with Prisma 7 for cases, provider events, decisions, policies, actions, reviews, evaluations, and audit history.
-- Zod for webhook, API, policy-input, and structured-decision validation.
-- A repository-driven recovery engine in `src/domain/` so financial and compliance behavior is testable without React.
-- `PrismaRecoveryStore` for atomic state transition plus audit writes and optimistic case versions.
-- Provider boundaries for Razorpay, OpenAI/OpenRouter, outbound actions, and deterministic sandbox behavior.
-- Vitest for unit and end-to-end domain integration tests.
+```mermaid
+flowchart LR
+    A[Provider or demo event] --> B[Event adapter]
+    B --> C[Normalized PaymentEvent]
+    C --> D{Idempotency gate}
+    D -->|new| E[RecoveryCase]
+    D -->|duplicate| L[Audit: duplicate ignored]
+    E --> F[Context builder]
+    F --> G[Decision provider]
+    G --> H[Structured RecoveryDecision]
+    H --> I{Policy engine}
+    I -->|allow| J[Bounded executor]
+    I -->|escalate| K[Human review]
+    I -->|block| M[Wait or stop]
+    J --> N[Result observer]
+    N --> O[State transition]
+    O --> P[Immutable audit event]
+    P --> Q[Metrics and re-evaluation]
+```
 
-The explicit case state machine is:
+### Explicit boundaries
 
-`DETECTED → ANALYZING → DECISION_READY → POLICY_CHECK → SCHEDULED/ACTION_PENDING → ACTION_EXECUTED/WAITING → RECOVERED/ESCALATED/STOPPED/FAILED`
+- **Domain engine** — orchestration, case state, decisions, policy evaluation, action authorization, and outcome handling live outside React.
+- **Decision providers** — deterministic mock, OpenAI, and OpenRouter implement the same provider contract.
+- **Policy engine** — deterministic and independently tested; covers retry/contact limits, opt-outs, invalid mandates, inactive subscriptions, high-value approval, disputes, confidence, and unsafe decisions.
+- **Action executors** — bounded adapters for retry, payment-method update, payment link, WhatsApp, email, escalation, wait, and stop.
+- **Provider adapters** — Razorpay types terminate at the adapter boundary; the recovery domain receives normalized events.
+- **Persistence** — PostgreSQL and Prisma store cases, events, decisions, evaluations, actions, reviews, and append-only audit facts.
 
-Invalid transitions throw a controlled error. `RECOVERED` and `STOPPED` are terminal. `FAILED` remains recoverable.
+### Case lifecycle
 
-## Why AI is used
+```text
+DETECTED → ANALYZING → DECISION_READY → POLICY_CHECK
+         → SCHEDULED / ACTION_PENDING
+         → ACTION_EXECUTED / WAITING
+         → RECOVERED / ESCALATED / STOPPED / FAILED
+```
 
-AI is used for ambiguous contextual judgment: whether to wait, retry, request an update, choose a communication channel, provide a payment link, escalate, or stop.
+Allowed transitions are declared explicitly. Invalid transitions fail safely. `RECOVERED` and `STOPPED` are terminal; `FAILED` remains inspectable and recoverable.
 
-AI is deliberately **not** used for:
+## Technology
 
-- money movement or authoritative financial calculations
-- authorization
-- retry or communication limits
-- customer consent and opt-outs
-- stopping conditions
-- high-value approval
-- state transitions
-- idempotency
-- audit history
+- Next.js 16 App Router, React 19, TypeScript 6, Tailwind CSS 4
+- PostgreSQL with Prisma 7
+- Zod for webhook, API, configuration, and AI-output validation
+- Vitest for domain, adapter, route, integration, and safety tests
+- Razorpay Payment Links in Test Mode
+- Optional OpenAI or OpenRouter structured decision providers
 
-Every AI result must pass the strict decision schema and the deterministic policy engine. Policy can return `ALLOW`, `BLOCK`, or `ESCALATE`; it is authoritative over the model.
+## Run locally
 
-## Setup
-
-Prerequisites:
+### Prerequisites
 
 - Node.js 22
-- PostgreSQL 14 or newer
 - npm 10
+- PostgreSQL 14+
+
+### Installation
 
 ```bash
-createdb recover_ai
+git clone https://github.com/akashdeep070/Recover-AI.git
+cd Recover-AI
 cp .env.example .env
 npm install
+createdb recover_ai
 npm run setup
 npm run dev
 ```
 
-Update `DATABASE_URL` in `.env` for your local PostgreSQL user before running setup. Open [http://localhost:3000](http://localhost:3000).
-
-The verified local setup used:
+Set your PostgreSQL connection in `.env` before `npm run setup`:
 
 ```env
-DATABASE_URL="postgresql://akashdeep@localhost:5432/recover_ai?schema=public"
+DATABASE_URL="postgresql://postgres:postgres@localhost:5432/recover_ai?schema=public"
 DECISION_PROVIDER="mock"
 ```
 
-## Environment variables
+Then open [http://localhost:3000](http://localhost:3000). Mock mode is deterministic and requires no external credentials.
 
-| Variable                   | Required        | Purpose                                          |
-| -------------------------- | --------------- | ------------------------------------------------ |
-| `DATABASE_URL`             | Yes             | PostgreSQL connection string                     |
-| `DECISION_PROVIDER`        | No              | `mock` by default; supports `ai` or `openrouter` |
-| `OPENAI_API_KEY`           | AI only         | Server-side OpenAI credential                    |
-| `OPENAI_MODEL`             | No              | Defaults to `gpt-5-mini`                         |
-| `OPENROUTER_API_KEY`       | OpenRouter only | Server-side OpenRouter credential                |
-| `OPENROUTER_MODELS`        | No              | Comma-separated ordered model fallback list      |
-| `OPENROUTER_BASE_URL`      | No              | Defaults to OpenRouter chat completions API      |
-| `OPENROUTER_SITE_URL`      | No              | Optional OpenRouter HTTP-Referer header          |
-| `OPENROUTER_APP_NAME`      | No              | Optional OpenRouter X-Title header               |
-| `RAZORPAY_KEY_ID`          | Razorpay only   | Must be a `rzp_test_` key                        |
-| `RAZORPAY_KEY_SECRET`      | Razorpay only   | Razorpay Test Mode server credential             |
-| `RAZORPAY_WEBHOOK_SECRET`  | Razorpay only   | HMAC webhook verification secret                 |
-| `RESEND_API_KEY`           | Not active      | Reserved for a future real email adapter         |
-| `WHATSAPP_ACCESS_TOKEN`    | Not active      | Reserved for a future real WhatsApp adapter      |
-| `WHATSAPP_PHONE_NUMBER_ID` | Not active      | Reserved for a future real WhatsApp adapter      |
+## Environment configuration
 
-Secrets are read only on the server. `.env` is ignored by Git.
+| Variable                  | Needed for                | Notes                                     |
+| ------------------------- | ------------------------- | ----------------------------------------- |
+| `DATABASE_URL`            | Local application         | PostgreSQL connection string              |
+| `DECISION_PROVIDER`       | Optional                  | `mock` (default), `ai`, or `openrouter`   |
+| `OPENAI_API_KEY`          | Live OpenAI decisions     | Server-side only                          |
+| `OPENAI_MODEL`            | Live OpenAI decisions     | Defaults to `gpt-5-mini`                  |
+| `OPENROUTER_API_KEY`      | Live OpenRouter decisions | Server-side only                          |
+| `OPENROUTER_MODELS`       | OpenRouter fallback       | Ordered, comma-separated model list       |
+| `OPENROUTER_BASE_URL`     | OpenRouter                | Defaults to its Chat Completions endpoint |
+| `OPENROUTER_SITE_URL`     | OpenRouter                | Optional HTTP referer metadata            |
+| `OPENROUTER_APP_NAME`     | OpenRouter                | Optional application title metadata       |
+| `RAZORPAY_KEY_ID`         | Razorpay Test Mode        | Must begin with `rzp_test_`               |
+| `RAZORPAY_KEY_SECRET`     | Razorpay Test Mode        | Server-side only                          |
+| `RAZORPAY_WEBHOOK_SECRET` | Signed webhooks           | Used for HMAC verification                |
 
-## Database setup
+Real email and WhatsApp delivery are not connected; those actions use auditable sandbox executors. Secrets belong only in `.env`, which Git ignores.
 
-The initial migration is in `prisma/migrations/20260824000000_init/`.
+## Database and demo data
 
 ```bash
 npm run db:generate
@@ -121,43 +187,58 @@ npm run db:migrate
 npm run db:seed
 ```
 
-For local schema iteration only, `npm run db:push` is also available. The seed is idempotent and creates 12 named demo cases covering smart retry, expired method, intentional wait, high-value review, opt-out, dispute, attempt limits, payment success during wait, provider failure, duplicate webhook, low confidence, and payment-link recovery.
+The idempotent seed creates 12 representative workflows, including successful smart retry, expired payment method, intentional wait, high-value review, opt-out, dispute, attempt limit, manual payment during a wait, provider failure, duplicate webhook, low confidence, and payment-link recovery.
 
-## Demo flow
+## Recovery Lab methodology
 
-1. Open **Overview** and establish the synthetic, PostgreSQL-backed control plane. Scroll to **Recovery intelligence** to show the persisted control funnel, recovered-volume attribution, customer-friction metrics, and the latest held-out comparison.
-2. Open **Recovery Lab** and click **Run evaluation**.
-3. Show the fixed seed, 100 identical cases, calculated incremental recovery, contact delta, escalations, policy violations, and duplicate actions.
-4. Expand an evaluation case to show observable context, bounded decision, policy result, and outcome. Hidden simulator behavior is not sent to this UI.
-5. Open **Recoveries → Ananya Bose** to show `WAIT`, policy authorization, the scheduled action cancellation, the `RECOVERED` state, and the immutable audit sequence.
-6. Open **Needs Review** to show high-value, dispute, and low-confidence gates.
-7. Open **Policies** to show and safely validate deterministic boundaries.
-8. Return to **Recovery Lab** and inject duplicate webhook, invalid AI output, or payment success during wait.
+Recovery Lab generates approximately 100 cases from a fixed PRNG seed. Each case has:
 
-For seed `20260823`, the verified synthetic run currently calculates:
+- **Observable context** available to both the decision strategy and policy engine.
+- **Hidden behavior** used only by the simulator to determine outcomes.
+- **Equivalent outcome windows** shared by the fixed baseline and RecoverAI.
 
-- baseline recovered: ₹2,67,369
-- RecoverAI recovered: ₹3,21,359
-- incremental recovery: +₹53,990
-- recovery-rate uplift: +4.0 percentage points
-- contact delta: -4
-- policy violations: 0
-- duplicate actions: 0
+The baseline follows a fixed recovery playbook. RecoverAI chooses contextually, but every recommendation still passes through the same deterministic policy boundary. Metrics are calculated from recorded outcomes—never hardcoded into dashboard components.
 
-These are reproducible simulator results, not customer or production outcomes.
+Reported metrics include revenue at risk, recovered revenue, recovery rate, incremental recovery, outbound contacts, contacts per ₹10,000 recovered, escalations, automation rate, policy violations, and duplicate actions.
 
-## Razorpay Test Mode setup
+## Razorpay Test Mode golden path
 
-1. Set `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, and `RAZORPAY_WEBHOOK_SECRET`.
-2. Configure the Test Mode webhook URL as `/api/webhooks/razorpay`.
-3. Subscribe to `payment.failed`, `payment.captured`/`payment.authorized`, `payment_link.paid`, `subscription.cancelled`, and `subscription.halted` as needed.
-4. Send the webhook signature in `x-razorpay-signature`; `x-razorpay-event-id` is used when present.
+```text
+₹2,499 payment fails
+  → RecoveryCase created
+  → context and structured recommendation recorded
+  → deterministic authority gate approves Payment Link
+  → exactly one Razorpay TEST Payment Link created
+  → signed payment_link.paid webhook reconciled
+  → identity, amount, and currency verified
+  → case becomes RECOVERED
+  → ₹2,499 enters TEST metrics exactly once
+```
 
-When no provider event ID is supplied, the adapter derives a stable SHA-256 event ID from the signed raw body. Missing webhook configuration returns `503`; invalid signatures return `401`. The real adapter creates only Razorpay **Test Mode** payment links. Other actions stay inside the sandbox adapter unless a bounded integration is implemented.
+Payment Link creation has two idempotency layers: a durable RecoverAI action key and a deterministic non-PII Razorpay `reference_id`. RecoverAI looks up that reference before creation and reconciles ambiguous timeouts or duplicate-reference responses using the same identity.
 
-Payment Link creation uses two idempotency layers: a durable RecoverAI action key and a deterministic, non-PII Razorpay `reference_id` (40 characters or fewer). RecoverAI looks up that reference before creating a link and reconciles it after ambiguous timeouts or duplicate-reference responses, so one logical recovery action cannot create a second link. A signed `payment_link.paid` event is matched to the stored provider link identity and checked for amount/currency before recovery is accounted.
+Webhook processing verifies the raw-body HMAC when configured, persists a stable provider event ID, rejects invalid signatures, matches the stored provider link identity, validates amount and currency, and deduplicates replayed paid events.
 
-## AI setup
+To enable it:
+
+1. Add Test Mode credentials and a webhook secret to `.env`.
+2. Expose `/api/webhooks/razorpay` through a reachable HTTPS URL.
+3. Configure that URL in the Razorpay Test Mode dashboard.
+4. Subscribe to the relevant payment, payment-link, and subscription events.
+
+Never configure Live Mode credentials for this hackathon build.
+
+## AI providers
+
+### Deterministic demo mode
+
+```env
+DECISION_PROVIDER="mock"
+```
+
+This is the reliable, credential-free path used by tests and the core demo.
+
+### OpenAI
 
 ```env
 DECISION_PROVIDER="ai"
@@ -165,19 +246,32 @@ OPENAI_API_KEY="..."
 OPENAI_MODEL="gpt-5-mini"
 ```
 
-The AI provider calls the Responses API with a strict JSON schema and a 10-second timeout. Invalid, unavailable, or timed-out output creates an audited human review and never reaches an executor. Keep `DECISION_PROVIDER="mock"` for deterministic tests and credential-free demos.
+The provider requests strict schema output with a bounded timeout. A timeout, malformed response, unsupported action, or validation error creates an audited safe escalation instead of executing anything.
 
-### OpenRouter setup
+### OpenRouter
 
 ```env
 DECISION_PROVIDER="openrouter"
 OPENROUTER_API_KEY="..."
-OPENROUTER_MODELS="nvidia/nemotron-3-ultra-550b-a55b:free,minimax/minimax-m3:free,nvidia/nemotron-3.5-lightning:free"
+OPENROUTER_MODELS="model-one,model-two"
 ```
 
-RecoverAI sends the same strict recovery-decision JSON schema to the configured model list in order. If a free model is unavailable, times out, or returns malformed output, the next configured model is tried. If every model fails, the recovery engine escalates safely; policy validation and action authorization are never bypassed. The API key is server-only and is never sent to the browser.
+Models are attempted in order. If every configured model fails or returns invalid output, the case escalates safely. Neither provider can bypass policy authorization.
 
-## Running tests
+## Failure injection
+
+Recovery Lab includes isolated controls for:
+
+| Scenario                      | Safety proof                                                |
+| ----------------------------- | ----------------------------------------------------------- |
+| `DUPLICATE_WEBHOOK`           | One logical workflow and action; duplicate recorded         |
+| `AI_TIMEOUT`                  | No unsafe execution; failure safely escalated               |
+| `AI_INVALID_OUTPUT`           | Schema rejection before the executor                        |
+| `MESSAGE_PROVIDER_DOWN`       | Failure recorded without an accidental duplicate message    |
+| `PAYMENT_SUCCESS_DURING_WAIT` | Pending action cancelled; case becomes recovered            |
+| `ACTION_EXECUTOR_TIMEOUT`     | Recoverable state retained with stable idempotency identity |
+
+## Verification
 
 ```bash
 npm run format:check
@@ -187,42 +281,39 @@ npm test
 npm run build
 ```
 
-The test suite covers the state machine, invalid transitions, all required policy boundaries, structured output, engine integration, duplicate events/actions, payment success during waiting, executor failure, reproducibility, baseline comparison, financial metrics, all six chaos scenarios, and Razorpay signature/normalization.
+Latest verified repository snapshot:
 
-## Failure injection
+| Check                      | Result                                                                  |
+| -------------------------- | ----------------------------------------------------------------------- |
+| Formatting                 | PASS                                                                    |
+| Lint                       | PASS — no errors or warnings                                            |
+| Typecheck                  | PASS                                                                    |
+| Unit and integration tests | PASS — 11 files / 75 tests                                              |
+| Production build           | PASS — 14 routes                                                        |
+| Recovery Lab               | PASS — reproducible seed, zero policy violations and duplicate actions  |
+| Razorpay Test API          | PASS — TEST Payment Link creation verified                              |
+| Signed webhook route       | PASS — local HMAC-signed paid event recovered once; replay deduplicated |
 
-Recovery Lab exposes:
+See [the full build status](docs/BUILD_STATUS.md) for the evidence and current implementation boundary.
 
-- `DUPLICATE_WEBHOOK`
-- `AI_TIMEOUT`
-- `AI_INVALID_OUTPUT`
-- `MESSAGE_PROVIDER_DOWN`
-- `PAYMENT_SUCCESS_DURING_WAIT`
-- `ACTION_EXECUTOR_TIMEOUT`
+## Current limitations
 
-Each scenario runs in an isolated in-memory workflow and returns its audit trail and safety invariant without changing seeded demo cases.
-
-## Architecture tradeoffs
-
-- A single recovery decision provider keeps the hackathon architecture explainable.
-- PostgreSQL persistence and explicit transitions were chosen before UI polish.
-- Long-running orchestration is stored as scheduled actions and recoverable states; Temporal/LangGraph were deliberately not added.
-- Recovery Lab uses a fixed PRNG seed and hidden per-window outcomes. The baseline's fixed 24-hour retry and RecoverAI's contextual retry consume different windows from the same underlying case behavior.
-- Human approval records a decision and queues fresh analysis rather than bypassing policy with a privileged executor.
-
-## Known limitations
-
-- OpenAI/OpenRouter live decision calls remain unverified. Razorpay Test Mode Payment Link creation and a locally HMAC-signed `payment_link.paid` route are verified in this checkout; an actual Razorpay-delivered webhook still needs a configured webhook secret and reachable public endpoint.
-- Email and WhatsApp are auditable sandbox executors; real providers are not connected.
-- Scheduled `WAIT` and post-approval re-analysis are persisted, but there is no background worker that wakes cases automatically after application restart.
-- There is no authentication, organization tenancy, rate limiting, or production observability stack; the UI is a local hackathon control plane.
-- The simulator is designed to demonstrate architecture and controlled experimentation, not to estimate real recovery uplift.
+- Actual Razorpay-delivered webhook receipt has not yet been verified through a public endpoint; current end-to-end verification uses the production route with a locally HMAC-signed fixture.
+- Live OpenAI and OpenRouter decision calls are implemented but not yet verified in the documented build snapshot.
+- Email and WhatsApp use sandbox executors.
+- Scheduled work is persisted, but no production background worker wakes cases after application restart.
+- Authentication, multi-tenancy, production rate limiting, tracing, and deployment infrastructure are intentionally outside hackathon scope.
+- The simulator demonstrates controlled methodology and system behavior; it does not estimate real-world recovery uplift.
 
 ## Documentation
 
-- [`docs/PRODUCT.md`](docs/PRODUCT.md)
-- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
-- [`docs/POLICIES.md`](docs/POLICIES.md)
-- [`docs/EVALUATION.md`](docs/EVALUATION.md)
-- [`docs/DEMO.md`](docs/DEMO.md)
-- [`docs/BUILD_STATUS.md`](docs/BUILD_STATUS.md)
+- [Product contract](docs/PRODUCT.md)
+- [System architecture](docs/ARCHITECTURE.md)
+- [Deterministic policies](docs/POLICIES.md)
+- [Evaluation methodology](docs/EVALUATION.md)
+- [Demo guide](docs/DEMO.md)
+- [Verified build status](docs/BUILD_STATUS.md)
+
+## License
+
+No open-source license has been added. All rights are reserved by the repository owner unless a license is provided later.
